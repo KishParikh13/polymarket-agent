@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Analyzer</title>
+<style>
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3a;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --accent:   #6366f1;
+    --green:    #22c55e;
+    --red:      #ef4444;
+    --yellow:   #eab308;
+    --tag-bg:   #1e293b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; }
+
+  /* Header */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+  .header h1 { font-size: 18px; font-weight: 700; background: linear-gradient(135deg, #6366f1, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .header .spacer { flex: 1; }
+  .stat-pill { background: var(--tag-bg); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; color: var(--muted); }
+  .stat-pill span { color: var(--text); font-weight: 600; }
+  .btn-icon { background: var(--tag-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; color: var(--muted); cursor: pointer; font-size: 13px; transition: all .15s; }
+  .btn-icon:hover { border-color: var(--accent); color: var(--text); }
+
+  /* Filters */
+  .filters { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .search-wrap { position: relative; flex: 1; min-width: 200px; }
+  .search-wrap input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px 7px 34px; color: var(--text); font-size: 13px; outline: none; transition: border-color .15s; }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-wrap .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; }
+  select, .filter-input { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--text); font-size: 13px; outline: none; cursor: pointer; }
+  select:focus, .filter-input:focus { border-color: var(--accent); }
+  .toggle-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .toggle { width: 36px; height: 20px; background: var(--border); border-radius: 10px; position: relative; transition: background .2s; cursor: pointer; }
+  .toggle.on { background: var(--accent); }
+  .toggle::after { content:''; position:absolute; width:14px; height:14px; background:white; border-radius:50%; top:3px; left:3px; transition: left .2s; }
+  .toggle.on::after { left:19px; }
+  .filter-label { font-size: 12px; color: var(--muted); }
+  .model-select-wrap { display: flex; align-items: center; gap: 6px; }
+  .model-select-wrap label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  /* Grid */
+  .main { padding: 20px 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+
+  /* Card */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; transition: border-color .15s; display: flex; flex-direction: column; gap: 12px; }
+  .card:hover { border-color: #3a3d4e; }
+  .card.analyzed-yes { border-color: #1a4a2e; }
+  .card.analyzed-no  { border-color: #4a1a1a; }
+  .card.analyzed-pass { border-color: #3a3d4e; }
+
+  .card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; border: 1px solid; }
+  .tag-politics  { color: #818cf8; border-color: #3730a3; background: #1e1b4b; }
+  .tag-economics { color: #34d399; border-color: #065f46; background: #022c22; }
+  .tag-crypto    { color: #fb923c; border-color: #7c2d12; background: #2d1503; }
+  .tag-sports    { color: #38bdf8; border-color: #0c4a6e; background: #082032; }
+  .tag-tech      { color: #c084fc; border-color: #581c87; background: #1a0533; }
+  .tag-other     { color: #94a3b8; border-color: #334155; background: #1e293b; }
+  .days-tag { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+  .card-question { font-size: 14px; font-weight: 500; line-height: 1.45; color: var(--text); }
+
+  /* Price bar */
+  .price-row { display: flex; align-items: center; gap: 8px; }
+  .price-bar-wrap { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .price-bar-yes { height: 100%; background: linear-gradient(90deg, var(--green), #16a34a); border-radius: 3px; transition: width .3s; }
+  .price-labels { display: flex; justify-content: space-between; font-size: 12px; }
+  .price-yes { color: var(--green); font-weight: 600; }
+  .price-no  { color: var(--red);   font-weight: 600; }
+  .vol-text  { font-size: 11px; color: var(--muted); text-align: right; }
+
+  /* Analyze button */
+  .btn-analyze { width: 100%; background: var(--tag-bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; transition: all .15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn-analyze:hover:not(:disabled) { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
+  .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Analysis result */
+  .analysis { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .analysis-header { display: flex; align-items: center; gap: 8px; }
+  .signal-badge { font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 6px; }
+  .signal-yes  { background: #14532d; color: var(--green); }
+  .signal-no   { background: #450a0a; color: var(--red); }
+  .signal-pass { background: var(--tag-bg); color: var(--muted); }
+  .analysis-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .stat-box { background: var(--bg); border-radius: 6px; padding: 6px 8px; text-align: center; }
+  .stat-box .val { font-size: 15px; font-weight: 700; }
+  .stat-box .lbl { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .edge-pos { color: var(--green); }
+  .edge-neg { color: var(--red); }
+  .analysis-reasoning { font-size: 12px; color: var(--muted); line-height: 1.5; background: var(--bg); border-radius: 6px; padding: 8px 10px; border-left: 2px solid var(--border); }
+  .analysis-model { font-size: 10px; color: #475569; text-align: right; }
+
+  /* Empty / loading */
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty h3 { font-size: 18px; margin-bottom: 8px; }
+  .loading-overlay { display: flex; align-items: center; justify-content: center; padding: 60px; }
+  .big-spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+
+  /* Responsive */
+  @media (max-width: 600px) { .filters { flex-direction: column; } .search-wrap { min-width: 100%; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🎯 Polymarket Analyzer</h1>
+  <div class="spacer"></div>
+  <div class="stat-pill" id="count-pill">Loading...</div>
+  <button class="btn-icon" onclick="loadMarkets()">↺ Refresh</button>
+</div>
+
+<div class="filters">
+  <!-- Search -->
+  <div class="search-wrap">
+    <span class="icon">🔍</span>
+    <input type="text" id="search" placeholder="Search markets..." oninput="debounce(loadMarkets, 400)()">
+  </div>
+
+  <!-- Days -->
+  <div style="display:flex;align-items:center;gap:6px">
+    <label class="filter-label">Closes in</label>
+    <select id="days" onchange="loadMarkets()">
+      <option value="7">7 days</option>
+      <option value="14">14 days</option>
+      <option value="30" selected>30 days</option>
+      <option value="60">60 days</option>
+      <option value="90">90 days</option>
+      <option value="365">1 year</option>
+    </select>
+  </div>
+
+  <!-- Category -->
+  <select id="category" onchange="loadMarkets()">
+    <option value="all">All categories</option>
+    <option value="politics">Politics</option>
+    <option value="economics">Economics</option>
+    <option value="crypto">Crypto</option>
+    <option value="sports">Sports</option>
+    <option value="tech">Tech</option>
+    <option value="other">Other</option>
+  </select>
+
+  <!-- Sort -->
+  <select id="sort" onchange="loadMarkets()">
+    <option value="volume">Sort: Volume</option>
+    <option value="closing">Sort: Closing soon</option>
+    <option value="price">Sort: Most uncertain</option>
+  </select>
+
+  <!-- Min volume -->
+  <div style="display:flex;align-items:center;gap:6px">
+    <label class="filter-label">Min vol $</label>
+    <input type="number" class="filter-input" id="min_volume" value="0" style="width:80px" onchange="loadMarkets()">
+  </div>
+
+  <!-- No crypto toggle -->
+  <div class="toggle-wrap" onclick="toggleCrypto()">
+    <div class="toggle" id="crypto-toggle"></div>
+    <span>No crypto</span>
+  </div>
+
+  <!-- AI Model selector -->
+  <div class="model-select-wrap">
+    <label>AI model:</label>
+    <select id="ai-model">
+      <option value="claude-sonnet-4-6">Claude Sonnet</option>
+      <option value="kimi-k2.5" selected>Kimi K2.5 (fast)</option>
+      <option value="claude-haiku-4-5">Claude Haiku</option>
+    </select>
+  </div>
+
+  <!-- News toggle -->
+  <div class="toggle-wrap" onclick="toggleNews()">
+    <div class="toggle" id="news-toggle"></div>
+    <span>Use news</span>
+  </div>
+</div>
+
+<div class="main">
+  <div id="grid" class="grid">
+    <div class="loading-overlay" style="grid-column:1/-1"><div class="big-spinner"></div></div>
+  </div>
+</div>
+
+<script>
+const state = { no_crypto: false, use_news: false };
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+function toggleCrypto() {
+  state.no_crypto = !state.no_crypto;
+  document.getElementById('crypto-toggle').classList.toggle('on', state.no_crypto);
+  loadMarkets();
+}
+
+function toggleNews() {
+  state.use_news = !state.use_news;
+  document.getElementById('news-toggle').classList.toggle('on', state.use_news);
+}
+
+function fmtVol(v) {
+  if (v >= 1e6) return `$${(v/1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `$${(v/1e3).toFixed(0)}K`;
+  return `$${v}`;
+}
+
+function fmtPct(v) { return `${(v*100).toFixed(0)}%`; }
+
+function daysLabel(d) {
+  if (d === 0) return '⚡ closes today';
+  if (d === 1) return '1d left';
+  return `${d}d left`;
+}
+
+async function loadMarkets() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '<div class="loading-overlay" style="grid-column:1/-1"><div class="big-spinner"></div></div>';
+
+  const params = new URLSearchParams({
+    days:       document.getElementById('days').value,
+    category:   document.getElementById('category').value,
+    sort:       document.getElementById('sort').value,
+    min_volume: document.getElementById('min_volume').value,
+    search:     document.getElementById('search').value,
+    no_crypto:  state.no_crypto,
+  });
+
+  try {
+    const res  = await fetch(`/api/markets?${params}`);
+    const data = await res.json();
+    renderMarkets(data.markets);
+    document.getElementById('count-pill').innerHTML = `<span>${data.total}</span> markets`;
+  } catch (e) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><h3>⚠️ Failed to load</h3><p>${e.message}</p></div>`;
+  }
+}
+
+function renderMarkets(markets) {
+  const grid = document.getElementById('grid');
+  if (!markets.length) {
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><h3>No markets found</h3><p>Try adjusting your filters</p></div>';
+    return;
+  }
+  grid.innerHTML = markets.map(m => cardHTML(m)).join('');
+}
+
+function cardHTML(m) {
+  const pctYes = Math.round(m.yes_price * 100);
+  const pctNo  = Math.round(m.no_price  * 100);
+  return `
+  <div class="card" id="card-${m.id}">
+    <div class="card-meta">
+      <span class="tag tag-${m.category}">${m.category}</span>
+      <span class="days-tag">${daysLabel(m.days_left)}</span>
+    </div>
+    <div class="card-question">${m.question}</div>
+    <div>
+      <div class="price-labels">
+        <span class="price-yes">YES ${pctYes}%</span>
+        <span class="price-no">NO ${pctNo}%</span>
+      </div>
+      <div class="price-row" style="margin-top:4px">
+        <div class="price-bar-wrap">
+          <div class="price-bar-yes" style="width:${pctYes}%"></div>
+        </div>
+      </div>
+      <div class="vol-text" style="margin-top:4px">${fmtVol(m.volume)} volume · closes ${m.end_date}</div>
+    </div>
+    <button class="btn-analyze" onclick="analyze(${JSON.stringify(m).replace(/"/g, '&quot;')})">
+      🤖 Analyze with AI
+    </button>
+    <div id="result-${m.id}" style="display:none"></div>
+  </div>`;
+}
+
+async function analyze(market) {
+  const card    = document.getElementById(`card-${market.id}`);
+  const resultEl = document.getElementById(`result-${market.id}`);
+  const btn     = card.querySelector('.btn-analyze');
+  const model   = document.getElementById('ai-model').value;
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+  resultEl.style.display = 'none';
+
+  try {
+    const res  = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id:        market.id,
+        question:  market.question,
+        yes_price: market.yes_price,
+        no_price:  market.no_price,
+        model:     model,
+        use_news:  state.use_news,
+      }),
+    });
+    const data = await res.json();
+    renderResult(market, data, resultEl, card);
+  } catch (e) {
+    resultEl.innerHTML = `<div class="analysis"><div style="color:var(--red);font-size:12px">Error: ${e.message}</div></div>`;
+    resultEl.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '↺ Re-analyze';
+}
+
+function renderResult(market, data, el, card) {
+  if (!data.signal) {
+    card.className = 'card analyzed-pass';
+    el.innerHTML = `
+      <div class="analysis">
+        <div class="analysis-header">
+          <span class="signal-badge signal-pass">⏭ NO BET</span>
+        </div>
+        <div class="analysis-reasoning">${data.reason}</div>
+        <div class="analysis-model">model: ${data.model || 'n/a'} · cat: ${data.category}</div>
+      </div>`;
+  } else {
+    const dir     = data.direction;
+    const isYes   = dir === 'YES';
+    card.className = `card analyzed-${isYes ? 'yes' : 'no'}`;
+
+    const mktProb  = isYes ? market.yes_price : market.no_price;
+    const mdlProb  = isYes ? data.probability : (1 - data.probability);
+    const edgeSign = data.edge >= 0 ? '+' : '';
+    const edgeCls  = data.edge >= 0 ? 'edge-pos' : 'edge-neg';
+
+    el.innerHTML = `
+      <div class="analysis">
+        <div class="analysis-header">
+          <span class="signal-badge signal-${dir.toLowerCase()}">
+            ${isYes ? '🟢' : '🔴'} BET ${dir}
+          </span>
+        </div>
+        <div class="analysis-stats">
+          <div class="stat-box">
+            <div class="val">${fmtPct(mktProb)}</div>
+            <div class="lbl">Market</div>
+          </div>
+          <div class="stat-box">
+            <div class="val">${fmtPct(data.probability)}</div>
+            <div class="lbl">Model</div>
+          </div>
+          <div class="stat-box">
+            <div class="val ${edgeCls}">${edgeSign}${fmtPct(data.edge)}</div>
+            <div class="lbl">Edge</div>
+          </div>
+        </div>
+        <div class="analysis-stats" style="margin-top:0">
+          <div class="stat-box" style="grid-column:1/3">
+            <div class="val">${fmtPct(data.confidence)}</div>
+            <div class="lbl">Confidence</div>
+          </div>
+          <div class="stat-box">
+            <div class="val" style="color:var(--yellow)">$${Math.round(30 * data.edge / (isYes ? market.yes_price : market.no_price) * 10) / 10}</div>
+            <div class="lbl">Est. Profit</div>
+          </div>
+        </div>
+        <div class="analysis-reasoning">${data.reasoning}</div>
+        <div class="analysis-model">model: ${data.model} · cat: ${data.category}</div>
+      </div>`;
+  }
+  el.style.display = 'block';
+}
+
+// Initial load
+loadMarkets();
+</script>
+</body>
+</html>

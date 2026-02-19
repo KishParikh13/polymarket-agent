@@ -14,12 +14,19 @@ except ImportError:
 
 # ── API ────────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+MOONSHOT_API_KEY  = os.getenv("MOONSHOT_API_KEY", "")    # Kimi K2.5 via Moonshot
+BRAVE_API_KEY     = os.getenv("BRAVE_API_KEY", "")       # Brave Search for news
 GAMMA_API_BASE    = "https://gamma-api.polymarket.com"
 
 # ── Models ─────────────────────────────────────────────────────────────────────
-PRIMARY_MODEL     = "claude-sonnet-4-6"          # main forecaster
-SECONDARY_MODEL   = "claude-haiku-4-5"           # consensus check (cheaper)
+# Override via env: PRIMARY_MODEL=kimi-k2-turbo-preview python backtest.py
+PRIMARY_MODEL     = os.getenv("PRIMARY_MODEL", "claude-sonnet-4-6")
+SECONDARY_MODEL   = os.getenv("SECONDARY_MODEL", "claude-haiku-4-5")
 CONSENSUS_MODE    = True                         # require both models to agree
+
+# ── Kimi / Moonshot OpenAI-compatible backend ──────────────────────────────────
+KIMI_BASE_URL     = "https://api.moonshot.ai/v1"
+KIMI_PRIMARY      = "kimi-k2-turbo-preview"     # fast + cheap, great for backtests
 
 # ── Bankroll & Sizing ──────────────────────────────────────────────────────────
 STARTING_BANKROLL     = 1_000.0                  # USD (paper money)

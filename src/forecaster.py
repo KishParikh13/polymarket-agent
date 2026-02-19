@@ -5,6 +5,7 @@ Supports single-model and two-model consensus modes.
 
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -22,14 +23,39 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
-_client: anthropic.Anthropic | None = None
+
+_anthropic_client: anthropic.Anthropic | None = None
+_openai_client: Any | None = None
+
+# Models that route through Moonshot (OpenAI-compatible) instead of Anthropic
+MOONSHOT_MODELS = {"kimi-k2.5", "kimi-k2-thinking", "moonshot/kimi-k2.5",
+                   "kimi-k2-turbo-preview", "kimi-k2-0711-preview", "kimi-latest"}
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    return _client
+def _get_anthropic_client() -> anthropic.Anthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
+
+
+def _get_openai_client():
+    """OpenAI-compatible client for Moonshot/Kimi models."""
+    global _openai_client
+    if _openai_client is None:
+        try:
+            from openai import OpenAI
+            _openai_client = OpenAI(
+                api_key=os.getenv("MOONSHOT_API_KEY", ""),
+                base_url="https://api.moonshot.ai/v1",
+            )
+        except ImportError:
+            raise RuntimeError("openai package not installed. Run: pip install openai")
+    return _openai_client
+
+
+def _is_moonshot(model: str) -> bool:
+    return model in MOONSHOT_MODELS or model.startswith("moonshot/") or model.startswith("kimi-")
 
 
 SYSTEM_PROMPT = """You are a JSON-only prediction market API endpoint.
@@ -110,7 +136,7 @@ def _parse_response(text: str) -> dict[str, Any] | None:
 
 
 def _ask_model(model: str, question: str, yes_price: float, news_context: str = "") -> dict[str, Any] | None:
-    """Call one model and parse its JSON response."""
+    """Call one model and parse its JSON response. Routes to Anthropic or Moonshot."""
     prompt = (
         f"Market: {question}\n"
         f"Market-implied YES probability: {yes_price:.2%}\n"
@@ -118,32 +144,43 @@ def _ask_model(model: str, question: str, yes_price: float, news_context: str = 
         f'Return JSON only: {{"probability":X.XX,"confidence":X.XX,"reasoning":"..."}}'
     )
     try:
-        resp = _get_client().messages.create(
-            model=model,
-            max_tokens=200,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = resp.content[0].text.strip()
-        result = _parse_response(text)
+        if _is_moonshot(model):
+            # Kimi / Moonshot — OpenAI-compatible API
+            model_id = model.replace("moonshot/", "")   # strip prefix if present
+            client   = _get_openai_client()
+            resp     = client.chat.completions.create(
+                model=model_id,
+                max_tokens=2048,  # Kimi uses reasoning tokens internally — needs headroom
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
+                temperature=1,    # Kimi K2.5 only accepts temperature=1
+            )
+            text = resp.choices[0].message.content.strip()
+        else:
+            # Claude — Anthropic API
+            resp = _get_anthropic_client().messages.create(
+                model=model,
+                max_tokens=200,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = resp.content[0].text.strip()
 
+        result = _parse_response(text)
         if result is None:
-            logger.warning(f"No JSON in model response: {text[:150]}")
+            logger.warning(f"No JSON from {model}: {text[:150]}")
             return None
 
         prob = result["probability"]
         conf = result["confidence"]
-
         if not (0.0 <= prob <= 1.0 and 0.0 <= conf <= 1.0):
-            logger.warning(f"Out-of-range values: prob={prob}, conf={conf}")
+            logger.warning(f"Out-of-range: prob={prob} conf={conf}")
             return None
 
-        return {
-            "probability": prob,
-            "confidence":  conf,
-            "reasoning":   result.get("reasoning", ""),
-            "model":       model,
-        }
+        return {"probability": prob, "confidence": conf,
+                "reasoning": result.get("reasoning", ""), "model": model}
 
     except Exception as e:
         logger.error(f"Model {model} failed: {e}")
