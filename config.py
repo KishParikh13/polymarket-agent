@@ -5,6 +5,13 @@ All tunable constants live here.
 
 import os
 
+# ── Load .env if present (python-dotenv) ───────────────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)  # don't override vars already set in shell
+except ImportError:
+    pass  # dotenv is optional; env vars can be set manually
+
 # ── API ────────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 GAMMA_API_BASE    = "https://gamma-api.polymarket.com"
@@ -33,3 +40,7 @@ DB_PATH               = "data/trades.db"
 
 # ── Calibration ───────────────────────────────────────────────────────────────
 CALIBRATION_BUCKETS   = 10                       # decile buckets for curve
+
+# ── Phase 2: News Context ──────────────────────────────────────────────────────
+USE_NEWS_CONTEXT      = True                     # include news headlines in LLM prompt
+NEWS_MAX_HEADLINES    = 5                        # how many headlines to fetch per market

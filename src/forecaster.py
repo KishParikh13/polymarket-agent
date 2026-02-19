@@ -17,6 +17,8 @@ from config import (
     CONSENSUS_MODE,
     CONSENSUS_TOLERANCE,
     CONFIDENCE_THRESHOLD,
+    USE_NEWS_CONTEXT,
+    NEWS_MAX_HEADLINES,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,11 +48,28 @@ Rules:
 - Do NOT output anything outside the JSON block"""
 
 
-def _ask_model(model: str, question: str, yes_price: float) -> dict[str, Any] | None:
+def _build_news_context(question: str) -> str:
+    """Return a formatted news block to append to the prompt, or empty string."""
+    if not USE_NEWS_CONTEXT:
+        return ""
+    try:
+        from src.news import fetch_headlines
+        headlines = fetch_headlines(question, max_results=NEWS_MAX_HEADLINES)
+        if not headlines:
+            return ""
+        lines = "\n".join(f"  • {h}" for h in headlines)
+        return f"\nRecent news headlines:\n{lines}\n"
+    except Exception as e:
+        logger.debug(f"News context skipped: {e}")
+        return ""
+
+
+def _ask_model(model: str, question: str, yes_price: float, news_context: str = "") -> dict[str, Any] | None:
     """Call one model and parse its JSON response."""
     prompt = (
         f"Market question: {question}\n"
-        f"Current YES price (market-implied probability): {yes_price:.2%}\n\n"
+        f"Current YES price (market-implied probability): {yes_price:.2%}\n"
+        f"{news_context}\n"
         "Estimate the true probability this resolves YES. Output JSON only."
     )
     try:
@@ -95,15 +114,16 @@ def forecast(market: dict[str, Any]) -> dict[str, Any] | None:
     Signal dict keys:
       probability, confidence, reasoning, bet_direction, model(s)
     """
-    question  = market["question"]
-    yes_price = market["yes_price"]
+    question    = market["question"]
+    yes_price   = market["yes_price"]
+    news_ctx    = _build_news_context(question)
 
-    primary = _ask_model(PRIMARY_MODEL, question, yes_price)
+    primary = _ask_model(PRIMARY_MODEL, question, yes_price, news_ctx)
     if primary is None:
         return None
 
     if CONSENSUS_MODE:
-        secondary = _ask_model(SECONDARY_MODEL, question, yes_price)
+        secondary = _ask_model(SECONDARY_MODEL, question, yes_price, news_ctx)
         if secondary is None:
             logger.info(f"Secondary model failed — skipping for safety: {question[:60]}")
             return None

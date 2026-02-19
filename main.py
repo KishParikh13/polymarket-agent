@@ -69,7 +69,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     _print(f"[green]Fetched {len(markets)} markets[/green]" if RICH else
            f"Fetched {len(markets)} markets")
 
-    signals = 0
+    signal_records: list[dict] = []
     for market in markets:
         category = classify(market["question"])
         _print(f"\n[dim]→ [{category}] {market['question'][:80]}[/dim]" if RICH else
@@ -82,7 +82,6 @@ def cmd_run(args: argparse.Namespace) -> None:
 
         trade_id = place_paper_bet(market, signal, category)
         if trade_id:
-            signals += 1
             direction = signal["bet_direction"]
             colour    = "green" if direction == "YES" else "red"
             _print(
@@ -96,9 +95,32 @@ def cmd_run(args: argparse.Namespace) -> None:
                 f"conf={signal['confidence']:.2f} edge={signal['edge']:.3f} "
                 f"[trade #{trade_id}]"
             )
+            # Collect for notifier summary
+            from src.paper_trader import kelly_size, _get_bankroll, get_conn  # type: ignore
+            conn = get_conn()
+            bk = _get_bankroll(conn)
+            conn.close()
+            signal_records.append({
+                "trade_id":        trade_id,
+                "question":        market["question"],
+                "bet_direction":   direction,
+                "probability":     signal["probability"],
+                "confidence":      signal["confidence"],
+                "edge":            signal["edge"],
+                "simulated_amount": kelly_size(bk, signal["confidence"]),
+            })
 
-    _print(f"\n[bold]Done. {signals}/{len(markets)} markets generated signals.[/bold]\n"
-           if RICH else f"\nDone. {signals}/{len(markets)} markets generated signals.\n")
+    _print(f"\n[bold]Done. {len(signal_records)}/{len(markets)} markets generated signals.[/bold]\n"
+           if RICH else f"\nDone. {len(signal_records)}/{len(markets)} markets generated signals.\n")
+
+    # Phase 2: structured run summary via notifier
+    try:
+        from src.notifier        import run_summary
+        from src.paper_trader    import get_portfolio_summary
+        summary = get_portfolio_summary()
+        run_summary(markets, signal_records, summary["bankroll"])
+    except Exception:
+        pass  # notifier is best-effort
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -260,6 +282,84 @@ def cmd_calibration(args: argparse.Namespace) -> None:
            "\nReport saved to calibration_report.json")
 
 
+def cmd_history(args: argparse.Namespace) -> None:
+    """Show the last N resolved trades with outcomes and P&L."""
+    from src.db import init_db, get_conn
+
+    init_db()
+    n = getattr(args, "n", 20)
+
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT id, question, category, bet_direction,
+               model_probability, implied_probability,
+               confidence, simulated_amount,
+               actual_outcome, profit_loss, timestamp
+        FROM trades
+        WHERE resolved = 1
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        (n,),
+    ).fetchall()
+    conn.close()
+
+    _print(f"\n[bold cyan]── Trade History (last {n} resolved) ──[/bold cyan]\n"
+           if RICH else f"\n── Trade History (last {n} resolved) ──\n")
+
+    if not rows:
+        _print("[yellow]No resolved trades yet.[/yellow]" if RICH else "No resolved trades yet.")
+        return
+
+    # Aggregate stats
+    wins     = sum(1 for r in rows if r["profit_loss"] and r["profit_loss"] > 0)
+    total_pl = sum((r["profit_loss"] or 0) for r in rows)
+    wagered  = sum((r["simulated_amount"] or 0) for r in rows)
+    roi      = (total_pl / wagered * 100) if wagered > 0 else 0.0
+
+    if RICH:
+        t = Table(
+            "ID", "Dir", "Question", "Prob", "Imp", "Outcome", "P&L",
+            box=None, show_lines=False, header_style="bold",
+        )
+        for r in rows:
+            direction = r["bet_direction"]
+            outcome   = r["actual_outcome"]
+            pnl       = r["profit_loss"] or 0.0
+            won       = pnl > 0
+            dir_col   = "green" if direction == "YES" else "red"
+            pnl_col   = "green" if won else "red"
+            out_str   = ("YES" if outcome == 1.0 else "NO") if outcome is not None else "?"
+            t.add_row(
+                str(r["id"]),
+                f"[{dir_col}]{direction}[/{dir_col}]",
+                (r["question"][:50] + "…") if len(r["question"]) > 50 else r["question"],
+                f"{r['model_probability']:.2f}",
+                f"{r['implied_probability']:.2f}",
+                out_str,
+                f"[{pnl_col}]${pnl:+.2f}[/{pnl_col}]",
+            )
+        console.print(t)  # type: ignore
+        console.print(  # type: ignore
+            f"\n[bold]Summary:[/bold] "
+            f"win_rate={wins}/{len(rows)} ({wins/len(rows)*100:.1f}%)  "
+            f"total_P&L=[{'green' if total_pl >= 0 else 'red'}]${total_pl:+.2f}[/{'green' if total_pl >= 0 else 'red'}]  "
+            f"ROI=[{'green' if roi >= 0 else 'red'}]{roi:.2f}%[/{'green' if roi >= 0 else 'red'}]\n"
+        )
+    else:
+        for r in rows:
+            pnl     = r["profit_loss"] or 0.0
+            outcome = ("YES" if r["actual_outcome"] == 1.0 else "NO") if r["actual_outcome"] is not None else "?"
+            print(
+                f"  #{r['id']:4d} {r['bet_direction']:3s} → {outcome:3s} "
+                f"P&L=${pnl:+.2f}  prob={r['model_probability']:.2f} "
+                f"| {r['question'][:55]}"
+            )
+        print(f"\n  Win rate: {wins}/{len(rows)} ({wins/len(rows)*100:.1f}%)  "
+              f"Total P&L: ${total_pl:+.2f}  ROI: {roi:.2f}%\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Polymarket AI Agent — paper trading + calibration",
@@ -271,6 +371,10 @@ def main() -> None:
     sub.add_parser("resolve",     help="Resolve completed markets and update P&L")
     sub.add_parser("calibration", help="Show Phase 1 calibration metrics")
 
+    # Phase 2 commands
+    hist_p = sub.add_parser("history", help="Show last N resolved trades with outcomes and P&L")
+    hist_p.add_argument("-n", type=int, default=20, help="Number of trades to show (default: 20)")
+
     args = parser.parse_args()
 
     if args.cmd == "run":
@@ -281,6 +385,8 @@ def main() -> None:
         cmd_resolve(args)
     elif args.cmd == "calibration":
         cmd_calibration(args)
+    elif args.cmd == "history":
+        cmd_history(args)
     else:
         parser.print_help()
 
