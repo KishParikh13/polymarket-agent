@@ -170,7 +170,27 @@ def _ask_model(model: str, question: str, yes_price: float, news_context: str = 
 
         result = _parse_response(text)
         if result is None:
-            logger.warning(f"No JSON from {model}: {text[:150]}")
+            # One retry with a more explicit prompt
+            logger.warning(f"No JSON from {model}, retrying...")
+            retry_prompt = f"You must respond with ONLY this JSON object and nothing else:\n{{\"probability\":0.50,\"confidence\":0.30,\"reasoning\":\"brief\"}}\n\nFor this market: {question}"
+            try:
+                if _is_moonshot(model):
+                    retry_resp = client.chat.completions.create(
+                        model=model_id, max_tokens=200, temperature=1,
+                        messages=[{"role":"user","content":retry_prompt}]
+                    )
+                    text = retry_resp.choices[0].message.content.strip()
+                else:
+                    retry_resp = _get_anthropic_client().messages.create(
+                        model=model, max_tokens=200,
+                        messages=[{"role":"user","content":retry_prompt}]
+                    )
+                    text = retry_resp.content[0].text.strip()
+                result = _parse_response(text)
+            except Exception:
+                pass
+        if result is None:
+            logger.warning(f"No JSON from {model} after retry: {text[:150]}")
             return None
 
         prob = result["probability"]

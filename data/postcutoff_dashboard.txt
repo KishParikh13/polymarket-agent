@@ -1,38 +1,40 @@
 
   ╔══════════════════════════════════════════════════════════════╗
   ║                     POST-CUTOFF BACKTEST                     ║
-  ║   resolved after 2025-03-01  ·  real prices  ·  RUNNING ▶    ║
+  ║   resolved after 2025-03-01  ·  real prices  ·  COMPLETE ✓   ║
   ╚══════════════════════════════════════════════════════════════╝
 
   ┌─ PROGRESS ──────────────────────────────────────────────────┐
-  │   █░░░░░░░░░░░░░░░░░░░░░░░░░░░  15/500  (3%)                 │
-  │   Elapsed 11:07  ETA 359:57  Rate 1.3/min                    │
+  │   ████████████████████████████  500/500  (100%)              │
+  │   Elapsed 317:28  ETA 00:00  Rate 1.6/min                    │
   └──────────────────────────────────────────────────────────────┘
 
   ┌─ RESULTS  (resolved immediately — real outcomes known) ─────┐
-  │   Signals      4  (27% rate)    No-signal  11                │
-  │   Win rate  ████████████████████  100%   4W / 0L             │
-  │   P&L       +$117.60      avg +$29.40/trade                  │
+  │   Signals     79  (16% rate)    No-signal  421               │
+  │   Win rate  ███████████████████░  95%   75W / 4L             │
+  │   P&L       +$2057.28     avg +$26.04/trade                  │
   └──────────────────────────────────────────────────────────────┘
 
   ┌─ LAST 12  (newest first) ───────────────────────────────────┐
-  │    15 ⏭  skip                        NIP to win 2 maps?      │
-  │    14 ⏭  skip                        Dota 2: BB Bros vs IAP  │
-  │    13 ✅ NO  75% mkt=50%→mdl=8% +$29.40    Morehead State Eagle…│
-  │    12 ⏭  skip                        Total Rounds Over/Under 46…│
-  │    11 ⏭  skip                        Will Trump pardon Joe Exot…│
-  │    10 ✅ NO  75% mkt=50%→mdl=3% +$29.40    Will Esteban Ocon wi…│
-  │     9 ⏭  skip                        Will Trump say "Two Weeks"…│
-  │     8 ⏭  skip                        Stetson Hatters vs. Alabam…│
-  │     7 ⏭  skip                        Southwestern Christian Eag…│
-  │     6 ⏭  skip                        Set Handicap: Busta (-1.5)…│
-  │     5 ⏭  skip                        SNHL: Kloten Flyers vs. Da…│
-  │     4 ✅ NO  65% mkt=50%→mdl=15% +$29.40    Alabama State Horne…│
+  │   500 ⏭  skip                        Will Gukesh D win the 2025…│
+  │   499 ✅ NO  65% mkt=50%→mdl=15% +$29.40    Will Giannis Anteto…│
+  │   498 ⏭  skip                        Swiss Indoors Basel: Aleja…│
+  │   497 ✅ NO  75% mkt=50%→mdl=4% +$29.40    Will Levon Aronian w…│
+  │   496 ⏭  skip                        LoL: TLN Pirates vs Vitali…│
+  │   495 ⏭  skip                        Valorant: BLG vs RRQ    │
+  │   494 ⏭  skip                        Will Apple (AAPL) close at…│
+  │   493 ⏭  skip                        Will Donald Trump sign an …│
+  │   492 ⏭  skip                        Will Trump meet with Vladi…│
+  │   491 ✅ NO  70% mkt=50%→mdl=1% +$29.40    Will David Munyua wi…│
+  │   490 ✅ NO  70% mkt=50%→mdl=4% +$29.40    Will Alexander Albon…│
+  │   489 ⏭  skip                        IEM Cologne: Natus Vincere…│
   └──────────────────────────────────────────────────────────────┘
 
   ┌─ BY CATEGORY ───────────────────────────────────────────────┐
-  │   other        ██████████  2W/0L  100%  +$58.80              │
-  │   sports       ██████████  2W/0L  100%  +$58.80              │
+  │   sports       ██████████  48W/0L  100%  +$1385.88           │
+  │   other        █████████░  23W/4L  85%  +$553.80             │
+  │   tech         ██████████  3W/0L  100%  +$88.20              │
+  │   politics     ██████████  1W/0L  100%  +$29.40              │
   └──────────────────────────────────────────────────────────────┘
 
   ──────────────────────────────────────────────────────────────
@@ -40,4 +42,4 @@
     ✓ Resolved AFTER 2025-03-01 → model never saw outcomes in training
     ✓ Real market prices → tests edge vs crowd wisdom
     ✓ No news fetching  → pure model knowledge signal
-  Updated 23:49:53
+  Updated 04:56:13

@@ -13,8 +13,11 @@ Usage:
   python simulate.py run              # fetch live markets, forecast, log paper trades
   python simulate.py run --days 7     # only markets closing within 7 days (faster results)
   python simulate.py run --days 30    # wider net, more markets
+  python simulate.py run --live       # place real CLOB orders for model signals
+  python simulate.py run --live --amount 5
   python simulate.py status           # show open bets + live P&L estimate
   python simulate.py resolve          # check which bets have resolved, compute P&L
+  python simulate.py portfolio        # show live CLOB portfolio snapshot
 """
 
 import argparse
@@ -267,6 +270,49 @@ def write_sim_dashboard(markets, results, processed, start_time, done=False):
 
 
 # ── Run simulation ─────────────────────────────────────────────────────────────
+def _insert_trade_row(
+    conn,
+    market_id: str,
+    question: str,
+    category: str,
+    model_probability: float,
+    confidence: float,
+    implied_probability: float,
+    bet_direction: str,
+    simulated_amount: float,
+    bankroll_at_bet: float,
+    timestamp: str,
+    resolved: int = 0,
+    actual_outcome=None,
+    profit_loss: float = 0.0,
+):
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO trades
+          (market_id, question, category,
+           model_probability, confidence, implied_probability,
+           bet_direction, simulated_amount, bankroll_at_bet, timestamp,
+           resolved, actual_outcome, profit_loss)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            market_id,
+            question,
+            category,
+            model_probability,
+            confidence,
+            implied_probability,
+            bet_direction,
+            simulated_amount,
+            bankroll_at_bet,
+            timestamp,
+            resolved,
+            actual_outcome,
+            profit_loss,
+        ),
+    )
+
+
 def cmd_run(args):
     from dotenv import load_dotenv
     load_dotenv()
@@ -275,13 +321,39 @@ def cmd_run(args):
     config.CONSENSUS_MODE = False      # single model for speed; flip for production
     config.USE_NEWS_CONTEXT = False    # no news — pure model signal vs market price
 
-    from src.db         import init_db, get_conn
-    from src.classifier import classify
-    from src.forecaster import forecast
-    from config         import ANTHROPIC_API_KEY
+    from src.db import init_db, get_conn
+    from config import (
+        ANTHROPIC_API_KEY,
+        LIVE_BET_SIZE_USDC,
+        POLY_PRIVATE_KEY,
+    )
+
+    live_mode = bool(getattr(args, "live", False))
+    amount_usdc = float(getattr(args, "amount", 0.0) or LIVE_BET_SIZE_USDC)
+    if live_mode and not POLY_PRIVATE_KEY:
+        print("ERROR: POLY_PRIVATE_KEY not set. Live mode requires wallet credentials.")
+        sys.exit(1)
+    if live_mode and amount_usdc <= 0:
+        print("ERROR: --amount must be > 0")
+        sys.exit(1)
 
     if not ANTHROPIC_API_KEY:
         print("ERROR: ANTHROPIC_API_KEY not set"); sys.exit(1)
+
+    try:
+        from src.classifier import classify
+        from src.forecaster import forecast
+    except Exception as e:
+        print(f"ERROR: failed to initialize forecasting modules: {e}")
+        sys.exit(1)
+
+    execute_signal = None
+    if live_mode:
+        try:
+            from src.executor import execute_signal
+        except Exception as e:
+            print(f"ERROR: failed to initialize live executor: {e}")
+            sys.exit(1)
 
     init_db()
 
@@ -291,58 +363,140 @@ def cmd_run(args):
     if not markets:
         print("No open markets found in that window."); return
 
-    print(f"\nSimulating {len(markets)} live markets | model vs real prices | no news")
+    mode_label = "LIVE ORDERS" if live_mode else "PAPER"
+    print(f"\nSimulating {len(markets)} live markets | model vs real prices | {mode_label}")
     print(f"Dashboard: watch -n1 cat {DASHBOARD_PATH}\n")
 
-    conn       = get_conn()
+    conn = get_conn()
     start_time = time.time()
-    results    = {"signal": 0, "no_signal": 0, "pnl": 0.0,
-                  "correct": 0, "resolved": 0, "bets": []}
+    results = {
+        "signal": 0,
+        "no_signal": 0,
+        "pnl": 0.0,
+        "correct": 0,
+        "resolved": 0,
+        "bets": [],
+        "live_placed": 0,
+        "live_errors": 0,
+    }
 
     for i, m in enumerate(markets):
         category = classify(m["question"])
-        signal   = forecast(m)   # uses REAL yes_price as implied prob
-        now      = datetime.now(timezone.utc).isoformat()
+        signal = forecast(m)   # uses REAL yes_price as implied prob
+        now = datetime.now(timezone.utc).isoformat()
 
         if signal is None:
-            conn.execute("""
-                INSERT OR IGNORE INTO trades
-                  (market_id, question, category,
-                   model_probability, confidence, implied_probability,
-                   bet_direction, simulated_amount, bankroll_at_bet, timestamp,
-                   resolved, actual_outcome, profit_loss)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0)
-            """, ("sim-" + m["id"], m["question"], category,
-                  0.5, 0.0, m["yes_price"], "NO_SIGNAL", 0.0, 0.0, now))
+            if not live_mode:
+                _insert_trade_row(
+                    conn=conn,
+                    market_id="sim-" + m["id"],
+                    question=m["question"],
+                    category=category,
+                    model_probability=0.5,
+                    confidence=0.0,
+                    implied_probability=m["yes_price"],
+                    bet_direction="NO_SIGNAL",
+                    simulated_amount=0.0,
+                    bankroll_at_bet=0.0,
+                    timestamp=now,
+                    resolved=0,
+                    actual_outcome=None,
+                    profit_loss=0.0,
+                )
             results["no_signal"] += 1
 
         else:
-            direction    = signal["bet_direction"]
-            model_prob   = signal["probability"]
-            market_prob  = m["yes_price"]
-            amount       = 30.0
-
-            conn.execute("""
-                INSERT OR IGNORE INTO trades
-                  (market_id, question, category,
-                   model_probability, confidence, implied_probability,
-                   bet_direction, simulated_amount, bankroll_at_bet, timestamp,
-                   resolved, actual_outcome, profit_loss)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0)
-            """, ("sim-" + m["id"], m["question"], category,
-                  model_prob, signal["confidence"], market_prob,
-                  direction, amount, 1000.0, now))
-
+            direction = signal["bet_direction"]
+            model_prob = signal["probability"]
+            market_prob = m["yes_price"]
             results["signal"] += 1
-            results["bets"].append({
-                "question":    m["question"],
-                "direction":   direction,
-                "conf":        signal["confidence"],
-                "amount":      amount,
-                "market_prob": market_prob,
-                "model_prob":  model_prob,
-                "days_left":   m["days_left"],
-            })
+
+            if live_mode:
+                exec_result = execute_signal(m, signal, amount_usdc=amount_usdc)
+                if exec_result.get("status") == "error":
+                    results["live_errors"] += 1
+                    err = exec_result.get("error", "unknown error")
+                    print(f"\n[LIVE][ERROR] {err} | {m['question'][:90]}")
+                    _insert_trade_row(
+                        conn=conn,
+                        market_id="live-" + m["id"],
+                        question=f"{m['question']} | LIVE_ERROR: {err}",
+                        category="live_error",
+                        model_probability=model_prob,
+                        confidence=signal["confidence"],
+                        implied_probability=market_prob,
+                        bet_direction=direction,
+                        simulated_amount=0.0,
+                        bankroll_at_bet=0.0,
+                        timestamp=now,
+                        resolved=1,
+                        actual_outcome=None,
+                        profit_loss=0.0,
+                    )
+                else:
+                    results["live_placed"] += 1
+                    print(
+                        f"\n[LIVE][PLACED] {direction:<3} ${amount_usdc:.2f} "
+                        f"@ {float(exec_result.get('price', 0.0)):.4f} "
+                        f"size={float(exec_result.get('size', 0.0)):.4f} "
+                        f"id={exec_result.get('order_id') or 'n/a'}"
+                    )
+                    _insert_trade_row(
+                        conn=conn,
+                        market_id="live-" + m["id"],
+                        question=m["question"],
+                        category="live",
+                        model_probability=model_prob,
+                        confidence=signal["confidence"],
+                        implied_probability=market_prob,
+                        bet_direction=direction,
+                        simulated_amount=amount_usdc,
+                        bankroll_at_bet=0.0,
+                        timestamp=now,
+                        resolved=0,
+                        actual_outcome=None,
+                        profit_loss=0.0,
+                    )
+                    results["bets"].append(
+                        {
+                            "question": m["question"],
+                            "direction": direction,
+                            "conf": signal["confidence"],
+                            "amount": amount_usdc,
+                            "market_prob": market_prob,
+                            "model_prob": model_prob,
+                            "days_left": m["days_left"],
+                        }
+                    )
+            else:
+                amount = 30.0
+                _insert_trade_row(
+                    conn=conn,
+                    market_id="sim-" + m["id"],
+                    question=m["question"],
+                    category=category,
+                    model_probability=model_prob,
+                    confidence=signal["confidence"],
+                    implied_probability=market_prob,
+                    bet_direction=direction,
+                    simulated_amount=amount,
+                    bankroll_at_bet=1000.0,
+                    timestamp=now,
+                    resolved=0,
+                    actual_outcome=None,
+                    profit_loss=0.0,
+                )
+                results["bets"].append(
+                    {
+                        "question": m["question"],
+                        "direction": direction,
+                        "conf": signal["confidence"],
+                        "amount": amount,
+                        "market_prob": market_prob,
+                        "model_prob": model_prob,
+                        "days_left": m["days_left"],
+                    }
+                )
 
         conn.commit()
         write_sim_dashboard(markets, results, i + 1, start_time)
@@ -350,8 +504,12 @@ def cmd_run(args):
     conn.close()
     write_sim_dashboard(markets, results, len(markets), start_time, done=True)
 
-    print(f"\n\nDone. {results['signal']} paper trades placed on live markets.")
-    print(f"Run 'python simulate.py resolve' in {days} days to check results.")
+    if live_mode:
+        print(f"\n\nDone. Signals={results['signal']} | placed={results['live_placed']} | errors={results['live_errors']}")
+        print("Run 'python simulate.py portfolio' to inspect live positions.")
+    else:
+        print(f"\n\nDone. {results['signal']} paper trades placed on live markets.")
+        print(f"Run 'python simulate.py resolve' in {days} days to check results.")
     print(f"Dashboard: {DASHBOARD_PATH}")
 
 
@@ -471,6 +629,54 @@ def cmd_resolve(args):
     conn.close()
 
 
+def cmd_portfolio(args):
+    """Show live CLOB portfolio snapshot."""
+    from dotenv import load_dotenv; load_dotenv()
+    from config import POLY_PRIVATE_KEY
+
+    if not POLY_PRIVATE_KEY:
+        print("ERROR: POLY_PRIVATE_KEY not set. Portfolio requires live credentials.")
+        return
+
+    try:
+        from src.executor import PolymarketExecutor
+        executor = PolymarketExecutor()
+        summary = executor.get_portfolio()
+    except Exception as e:
+        print(f"ERROR: failed to load live portfolio: {e}")
+        return
+
+    usdc_balance = float(summary.get("usdc_balance", 0.0))
+    total_unrealized = float(summary.get("total_unrealized_pnl", 0.0))
+    positions = summary.get("positions", [])
+
+    W = 70
+    print(f"\n  ╔{'═' * W}╗")
+    print(f"  ║{center('LIVE PORTFOLIO', W)}║")
+    print(f"  ╚{'═' * W}╝\n")
+    print(f"  USDC balance:       ${usdc_balance:.4f}")
+    print(f"  Unrealized P&L:     {fmt_pnl(total_unrealized)}")
+    print(f"  Open positions:     {len(positions)}")
+
+    if not positions:
+        print("\n  (no positions)")
+        return
+
+    print(f"\n  {'─' * W}")
+    for pos in positions:
+        q = str(pos.get("question", ""))
+        if len(q) > 66:
+            q = q[:66] + "…"
+        print(
+            f"  {pos.get('direction', '?'):<3} "
+            f"size={float(pos.get('size', 0.0)):.4f} "
+            f"entry={float(pos.get('entry_price', 0.0)):.4f} "
+            f"now={float(pos.get('current_price', 0.0)):.4f} "
+            f"pnl={fmt_pnl(float(pos.get('unrealized_pnl', 0.0)))}"
+        )
+        print(f"      {q}")
+
+
 # ── Entry ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Live market simulation — objective, no leakage")
@@ -479,9 +685,14 @@ def main():
     p_run = sub.add_parser("run", help="Run simulation on live open markets")
     p_run.add_argument("--days", type=int, default=30,
                        help="Only markets closing within N days (default 30)")
+    p_run.add_argument("--live", action="store_true",
+                       help="Execute real CLOB orders instead of paper trades")
+    p_run.add_argument("--amount", type=float, default=None,
+                       help="USDC per live order (default from LIVE_BET_SIZE_USDC)")
 
     sub.add_parser("status",  help="Show open bets and resolved results")
     sub.add_parser("resolve", help="Check which bets have resolved, compute P&L")
+    sub.add_parser("portfolio", help="Show live Polymarket portfolio")
 
     args = parser.parse_args()
 
@@ -491,6 +702,8 @@ def main():
         cmd_status(args)
     elif args.cmd == "resolve":
         cmd_resolve(args)
+    elif args.cmd == "portfolio":
+        cmd_portfolio(args)
     else:
         parser.print_help()
 

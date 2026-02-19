@@ -45,6 +45,18 @@ ROUND_TRIP_COST_PCT   = 0.02                     # 2% spread/fees assumption
 # ── DB ────────────────────────────────────────────────────────────────────────
 DB_PATH               = "data/trades.db"
 
+# ── Polymarket CLOB (live trading) ────────────────────────────────────────────
+POLY_HOST             = os.getenv("POLY_HOST", "https://clob.polymarket.com")
+POLY_CHAIN_ID         = int(os.getenv("POLY_CHAIN_ID", "137"))
+POLY_PRIVATE_KEY      = os.getenv("POLY_PRIVATE_KEY", "")
+POLY_API_KEY          = os.getenv("POLY_API_KEY", "")
+POLY_API_SECRET       = os.getenv("POLY_API_SECRET", "")
+POLY_API_PASSPHRASE   = os.getenv("POLY_API_PASSPHRASE", "")
+
+# ── Live trading limits ────────────────────────────────────────────────────────
+LIVE_BET_SIZE_USDC    = float(os.getenv("LIVE_BET_SIZE_USDC", "5.0"))
+LIVE_MAX_EXPOSURE     = float(os.getenv("LIVE_MAX_EXPOSURE", "50.0"))
+
 # ── Calibration ───────────────────────────────────────────────────────────────
 CALIBRATION_BUCKETS   = 10                       # decile buckets for curve
 

@@ -236,15 +236,16 @@ async def analyze_market(req: AnalyzeRequest):
                 "model":     req.model or config.PRIMARY_MODEL,
             })
 
+        edge = signal.get("edge", signal["probability"] - req.yes_price)
         return JSONResponse({
             "signal":      True,
             "direction":   signal["bet_direction"],
             "probability": round(signal["probability"], 3),
             "confidence":  round(signal["confidence"], 3),
-            "edge":        round(signal["edge"], 3),
+            "edge":        round(edge, 3),
             "reasoning":   signal["reasoning"],
             "category":    category,
-            "model":       signal["models"][0] if signal.get("models") else "",
+            "model":       signal.get("model", config.PRIMARY_MODEL),
         })
 
     except Exception as e:
