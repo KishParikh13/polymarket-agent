@@ -1,0 +1,38 @@
+
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                  POLYMARKET LIVE SIMULATION                  ║
+  ║           OPEN markets · real prices · COMPLETE ✓            ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+  ┌─ PROGRESS ──────────────────────────────────────────────────┐
+  │   ████████████████████████████  300/300  (100%)              │
+  │   Elapsed 10:42  ETA 00:00  Rate 28.0/min                    │
+  └──────────────────────────────────────────────────────────────┘
+
+  ┌─ PAPER TRADES ──────────────────────────────────────────────┐
+  │   Signals fired     11  (4% signal rate)                     │
+  │   Skipped (low edge/conf)   289                              │
+  │   Resolved so far     0  (markets still open)                │
+  │   Unrealized P&L  +$0.00                                     │
+  └──────────────────────────────────────────────────────────────┘
+
+  ┌─ OPEN BETS  (11 total) ─────────────────────────────────────┐
+  │   ⏳0d NO  65%  $30  mkt=86%→mdl=82%  Will Tesla (TSLA) close above $4…│
+  │   ⏳0d NO  70%  $30  mkt=14%→mdl=5%  Will the Supreme Court rule on T…│
+  │   ⏳1d NO  70%  $30  mkt=87%→mdl=82%  Will Meta (META) finish week of …│
+  │   ⏳3d NO  65%  $30  mkt=14%→mdl=8%  Will Feyenoord Rotterdam vs. Tel…│
+  │   ⏳8d NO  72%  $30  mkt=13%→mdl=8%  Will Opendoor (OPEN) close above…│
+  │   ⏳8d NO  65%  $30  mkt=88%→mdl=82%  Will Alphabet be the third-large…│
+  │   ⏳11d YES 75%  $30  mkt=31%→mdl=85%  Will John Cornyn win the first r…│
+  │   ⏳34d NO  65%  $30  mkt=54%→mdl=25%  Will the Bank of Mexico announce…│
+  │   ⏳39d NO  72%  $30  mkt=48%→mdl=4%  Will KOSPI Composite Index (^KS1…│
+  │   ⏳39d NO  72%  $30  mkt=47%→mdl=18%  Will Artemis II launch by March …│
+  │   ⏳55d NO  65%  $30  mkt=33%→mdl=18%  Will the San Jose Sharks make th…│
+  └──────────────────────────────────────────────────────────────┘
+
+  ──────────────────────────────────────────────────────────────
+  Why this test is clean:
+    ✓ Open markets → outcomes unknown (zero leakage)
+    ✓ Real prices  → testing edge vs market, not just direction
+    ✓ No news      → pure model signal vs crowd wisdom
+  Updated 19:56:20  ·  run 'python simulate.py resolve' to check results

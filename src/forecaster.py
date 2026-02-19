@@ -32,20 +32,18 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-SYSTEM_PROMPT = """You are an expert prediction market analyst.
-Given a market question and current market price, estimate the true probability that the answer is YES.
+SYSTEM_PROMPT = """You are a JSON-only prediction market API endpoint.
+Input: a market question + current market price.
+Output: a single JSON object, nothing else.
 
-Rules:
-- Be concise but rigorous in your reasoning
-- Account for current market price as a signal (but not the only one)
-- Output ONLY valid JSON with these fields:
-  {
-    "probability": <float 0.0–1.0>,
-    "confidence": <float 0.0–1.0, how sure you are in your estimate>,
-    "reasoning": "<one paragraph>"
-  }
-- If you have very low information, set confidence < 0.4
-- Do NOT output anything outside the JSON block"""
+Required format (copy exactly, fill in values):
+{"probability":0.00,"confidence":0.00,"reasoning":"one sentence"}
+
+- probability: float 0.0–1.0, your true probability YES resolves
+- confidence: float 0.0–1.0, your certainty (low info = below 0.4)
+- reasoning: one short sentence, no newlines
+- DO NOT write anything before or after the JSON object
+- DO NOT use markdown code blocks"""
 
 
 def _build_news_context(question: str) -> str:
@@ -64,32 +62,77 @@ def _build_news_context(question: str) -> str:
         return ""
 
 
+def _parse_response(text: str) -> dict[str, Any] | None:
+    """
+    Extract probability + confidence from model response.
+    Handles: clean JSON, JSON in prose, and plain prose with percentages.
+    """
+    # 1. Try direct JSON parse
+    try:
+        result = json.loads(text)
+        return {"probability": float(result["probability"]),
+                "confidence":  float(result["confidence"]),
+                "reasoning":   result.get("reasoning", "")}
+    except Exception:
+        pass
+
+    # 2. Try extracting JSON block from mixed text
+    match = re.search(r"\{[^{}]*\"probability\"[^{}]*\}", text, re.DOTALL)
+    if match:
+        try:
+            result = json.loads(match.group())
+            return {"probability": float(result["probability"]),
+                    "confidence":  float(result["confidence"]),
+                    "reasoning":   result.get("reasoning", "")}
+        except Exception:
+            pass
+
+    # 3. Prose fallback: extract bare numbers for probability + confidence
+    # Handles patterns like: "probability of 0.72" or "72%" or "confidence: 0.8"
+    prob_match = re.search(
+        r"(?:probability[:\s]+|\"probability\"[:\s]+)(0\.\d+|\d{1,2}%)", text, re.IGNORECASE
+    )
+    conf_match = re.search(
+        r"(?:confidence[:\s]+|\"confidence\"[:\s]+)(0\.\d+|\d{1,2}%)", text, re.IGNORECASE
+    )
+    if prob_match and conf_match:
+        def to_float(s: str) -> float:
+            return float(s.strip("%")) / 100 if "%" in s else float(s)
+        try:
+            prob = to_float(prob_match.group(1))
+            conf = to_float(conf_match.group(1))
+            if 0.0 <= prob <= 1.0 and 0.0 <= conf <= 1.0:
+                return {"probability": prob, "confidence": conf, "reasoning": "extracted from prose"}
+        except Exception:
+            pass
+
+    return None
+
+
 def _ask_model(model: str, question: str, yes_price: float, news_context: str = "") -> dict[str, Any] | None:
     """Call one model and parse its JSON response."""
     prompt = (
-        f"Market question: {question}\n"
-        f"Current YES price (market-implied probability): {yes_price:.2%}\n"
-        f"{news_context}\n"
-        "Estimate the true probability this resolves YES. Output JSON only."
+        f"Market: {question}\n"
+        f"Market-implied YES probability: {yes_price:.2%}\n"
+        f"{news_context}"
+        f'Return JSON only: {{"probability":X.XX,"confidence":X.XX,"reasoning":"..."}}'
     )
     try:
         resp = _get_client().messages.create(
             model=model,
-            max_tokens=512,
+            max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
         text = resp.content[0].text.strip()
+        result = _parse_response(text)
 
-        # Extract JSON block (handles ```json ... ``` wrappers)
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            logger.warning(f"No JSON in model response: {text[:200]}")
+        if result is None:
+            logger.warning(f"No JSON in model response: {text[:150]}")
             return None
 
-        result = json.loads(match.group())
-        prob = float(result["probability"])
-        conf = float(result["confidence"])
+        prob = result["probability"]
+        conf = result["confidence"]
 
         if not (0.0 <= prob <= 1.0 and 0.0 <= conf <= 1.0):
             logger.warning(f"Out-of-range values: prob={prob}, conf={conf}")
